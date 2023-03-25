@@ -24,7 +24,9 @@ KSRC := /lib/modules/$(KVER)/build
 KMISC := /lib/modules/$(KVER)/kernel/drivers/misc
 KMISC_INC := /lib/modules/$(KVER)/include
 
-SYSCALL_TBL = 0x$(shell $(EXTRACT) sys_call_table)
+SYSCALL_TBL = 0xffffffff820013c0
+# 0xffffffff820013c0
+# $(shell $(EXTRACT) sys_call_table)
 DO_FORK = 0x$(shell $(EXTRACT) do_fork)
 _DO_FORK = 0x$(shell $(EXTRACT) _do_fork)
 
@@ -40,7 +42,7 @@ VERFILE := $(KSRC_OUTPUT)/include/linux/version.h
 KERNELRELEASE := $(shell \
 	if [ -r $(VERFILE) ]; then \
 		(cat $(VERFILE); echo UTS_RELEASE) | \
-		$(CC) -I$(KSRC_OUTPUT) $(CFLAGS) -E - | \
+		$(CC) -O0 -g3 -I$(KSRC_OUTPUT) $(CFLAGS) -E - | \
 		tail -n 1 | \
 		xargs echo; \
         else \

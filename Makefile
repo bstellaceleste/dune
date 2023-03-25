@@ -2,13 +2,13 @@ LIBC	= eglibc-2.14/eglibc-build/libc.so
 SUBDIRS	= kern libdune
 
 all: $(SUBDIRS)
-libc: $(LIBC)
+# libc: $(LIBC)
 
 $(SUBDIRS):
 	$(MAKE) -C $(@)
 
-$(LIBC):
-	sh build-eglibc.sh
+# $(LIBC):
+#	sh build-eglibc.sh
 
 clean:
 	for dir in $(SUBDIRS); do \

@@ -64,6 +64,7 @@
 #include "compat.h"
 #include "apic.h"
 
+
 static atomic_t vmx_enable_failed;
 
 static DECLARE_BITMAP(vmx_vpid_bitmap, VMX_NR_VPIDS);
@@ -79,7 +80,7 @@ static struct vmx_vcpu *vcpus_hash[NR_CPUS];
 static void *virtual_apic_pages[NR_CPUS];
 static posted_interrupt_desc *posted_interrupt_descriptors[NR_CPUS];
 
-#define NUM_SYSCALLS 312
+#define NUM_SYSCALLS 332
 
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(3,11,0)
 typedef void (*sys_call_ptr_t)(void);
@@ -94,6 +95,23 @@ static DEFINE_PER_CPU(int, vmx_enabled);
 DEFINE_PER_CPU(struct vmx_vcpu *, local_vcpu);
 
 static LIST_HEAD(vcpus);
+
+void dune_fpu__restore(struct fpu *fpu)
+{
+	//initialize
+	WARN_ON_FPU(fpu != &current->thread.fpu);
+
+	set_thread_flag(TIF_NEED_FPU_LOAD);
+	fpstate_init(&fpu->state);
+
+	/* Avoid __kernel_fpu_begin() right after fpregs_activate() */
+	dune_kernel_fpu_disable();
+	//trace_x86_fpu_before_restore(fpu);
+	dune_fpregs_activate(fpu);
+	copy_kernel_to_fpregs(&fpu->state);
+	//trace_x86_fpu_after_restore(fpu);
+	dune_kernel_fpu_enable();
+}
 
 static struct vmcs_config {
 	int size;
@@ -539,7 +557,7 @@ static void vmx_setup_constant_host_state(struct vmx_vcpu *vcpu)
 
 	vmcs_writel(HOST_CR0, read_cr0() & ~X86_CR0_TS);  /* 22.2.3 */
 	vmcs_writel(HOST_CR4, __read_cr4());  /* 22.2.3, 22.2.5 */
-	vmcs_writel(HOST_CR3, read_cr3());  /* 22.2.3 */
+	vmcs_writel(HOST_CR3, __read_cr3());  /* 22.2.3 */
 
 	vmcs_write16(HOST_CS_SELECTOR, __KERNEL_CS);  /* 22.2.4 */
 	vmcs_write16(HOST_DS_SELECTOR, __KERNEL_DS);  /* 22.2.4 */
@@ -608,10 +626,10 @@ static unsigned long segment_base(u16 selector)
 	}
 	d = (struct desc_struct *)(table_base + (selector & ~7));
 	v = get_desc_base(d);
-#ifdef CONFIG_X86_64
+/*#ifdef CONFIG_X86_64
        if (d->s == 0 && (d->type == 2 || d->type == 9 || d->type == 11))
                v |= ((unsigned long)((struct ldttss_desc64 *)d)->base3) << 32;
-#endif
+#endif*/
 	return v;
 }
 
@@ -798,15 +816,16 @@ static void vmx_dump_cpu(struct vmx_vcpu *vcpu)
 	printk(KERN_INFO "vmx: --- End VCPU Dump ---\n");
 }
 
+/***************************/
 static u64 construct_eptp(unsigned long root_hpa)
 {
-	u64 eptp;
+	u64 eptp = VMX_EPTP_MT_WB;
+
+	eptp |= VMX_EPTP_PWL_4;
 
 	/* TODO write the value reading from MSR */
-	eptp = VMX_EPT_DEFAULT_MT |
-		VMX_EPT_DEFAULT_GAW << VMX_EPT_GAW_EPTP_SHIFT;
 	if (cpu_has_vmx_ept_ad_bits())
-		eptp |= VMX_EPT_AD_ENABLE_BIT;
+		eptp |= VMX_EPTP_AD_ENABLE_BIT;
 	eptp |= (root_hpa & PAGE_MASK);
 
 	return eptp;
@@ -1246,7 +1265,7 @@ static struct vmx_vcpu * vmx_create_vcpu(struct dune_config *conf)
 	vcpu->cpu = -1;
 	vcpu->syscall_tbl = (void *) &dune_syscall_tbl;
 
-	native_store_idt(&dt);
+	store_idt(&dt);
 	vcpu->idt_base = (void *)dt.address;
 
 	spin_lock_init(&vcpu->ept_lock);
@@ -1339,7 +1358,10 @@ static int dune_exit_group(int error_code)
 
 	return 0;
 }
-
+/***************/
+#define __addr_ok(addr) 	\
+	((unsigned long __force)(addr) < user_addr_max())
+/***************/
 static void make_pt_regs(struct vmx_vcpu *vcpu, struct pt_regs *regs,
 			 int sysnr)
 {
@@ -1448,7 +1470,7 @@ static void vmx_init_syscall(void)
 {
 	memcpy(dune_syscall_tbl, (void *) SYSCALL_TBL,
 	       sizeof(sys_call_ptr_t) * NUM_SYSCALLS);
-	
+
 	dune_syscall_tbl[__NR_exit] = (void *) &dune_exit;
 	dune_syscall_tbl[__NR_exit_group] = (void *) &dune_exit_group;
 	dune_syscall_tbl[__NR_clone] = (void *) &dune_sys_clone;
@@ -1782,7 +1804,7 @@ static void vmx_handle_external_interrupt(struct vmx_vcpu *vcpu, u32 exit_intr_i
 		register unsigned long current_stack_pointer asm(_ASM_SP);
 		vector =  exit_intr_info & INTR_INFO_VECTOR_MASK;
 		desc = (gate_desc *)vcpu->idt_base + vector;
-		entry = gate_offset(*desc);
+		entry = gate_offset(desc);
 
 		if (vector == POSTED_INTR_VECTOR) {
 			dune_apic_write_eoi();
@@ -2094,7 +2116,7 @@ static void free_virtual_apic_pages(void)
 __init int vmx_init(void)
 {
 	int r, cpu;
-	
+
 	if (!cpu_has_vmx()) {
 		printk(KERN_ERR "vmx: CPU does not support VT-x\n");
 		return -EIO;
@@ -2130,7 +2152,6 @@ __init int vmx_init(void)
 	__vmx_disable_intercept_for_msr(msr_bitmap, MSR_GS_BASE);
 	__vmx_disable_intercept_for_msr(msr_bitmap, MSR_PKG_ENERGY_STATUS);
 	__vmx_disable_intercept_for_msr(msr_bitmap, MSR_RAPL_POWER_UNIT);
-
 
 	/* APIC virtualization and posted interrupts */
 
@@ -2176,11 +2197,12 @@ __init int vmx_init(void)
 	}
 
 	atomic_set(&vmx_enable_failed, 0);
-	if (on_each_cpu(vmx_enable, NULL, 1)) {
-		printk(KERN_ERR "vmx: timeout waiting for VMX mode enable.\n");
-		r = -EIO;
-		goto failed1; /* sadly we can't totally recover */
-	}
+	on_each_cpu(vmx_enable, NULL, 1);
+	// if (on_each_cpu(vmx_enable, NULL, 1)) {
+	// 	printk(KERN_ERR "vmx: timeout waiting for VMX mode enable.\n");
+	// 	r = -EIO;
+	// 	goto failed1; /* sadly we can't totally recover */
+	// }
 
 	if (atomic_read(&vmx_enable_failed)) {
 		r = -EBUSY;

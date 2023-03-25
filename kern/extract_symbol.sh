@@ -20,15 +20,15 @@ fi
 
 check_file $SYSTEM_MAP
 
-SYSTEM_MAP=/lib/modules/$KVER/build/System.map
-check_file $SYSTEM_MAP
+# SYSTEM_MAP=/lib/modules/$KVER/build/System.map
+# check_file $SYSTEM_MAP
 
-VMLINUX=/lib/modules/$KVER/build/vmlinux
-ls $VMLINUX 2> /dev/null > /dev/null
-if [ $? -eq 0 ] ; then
-	nm $VMLINUX | egrep " $SYM\$" | egrep " (R|T) " | cut -d" " -f1
-	exit 0
-fi
+# VMLINUX=/lib/modules/$KVER/build/vmlinux
+# ls $VMLINUX 2> /dev/null > /dev/null
+# if [ $? -eq 0 ] ; then
+# 	nm $VMLINUX | egrep " $SYM\$" | egrep " (R|T) " | cut -d" " -f1
+# 	exit 0
+# fi
 
 echo "FAILED - Can't find symbol!"
 exit 1

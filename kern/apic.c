@@ -2,6 +2,7 @@
 
 #include <linux/mm.h>
 #include <linux/slab.h>
+#include <asm/apic.h>
 #include <asm/ipi.h>
 
 #include "dune.h"
@@ -13,6 +14,11 @@ static int *apic_routing;
 static int num_rt_entries;
 
 #define BY_APIC_TYPE(x, x2) if (x2apic_enabled()) { x2; } else { x; }
+
+static inline void x2apic_wrmsr_fence(void)
+{
+	asm volatile("mfence" : : : "memory");
+}
 
 u32 dune_apic_id(void)
 {
@@ -102,6 +108,38 @@ static void dune_apic_send_ipi_x2(u8 vector, u32 destination_apic_id)
 	low = __prepare_ICR(0, vector, APIC_DEST_PHYSICAL);
 	x2apic_wrmsr_fence();
 	wrmsrl(APIC_BASE_MSR + (APIC_ICR >> 4), ((__u64) destination_apic_id) << 32 | low);
+}
+/*
+ * This is used to send an IPI with no shorthand notation (the destination is
+ * specified in bits 56 to 63 of the ICR).
+ */
+void __default_send_IPI_dest_field(unsigned int mask, int vector, unsigned int dest)
+{
+	unsigned long cfg;
+
+	/*
+	 * Wait for idle.
+	 */
+	if (unlikely(vector == NMI_VECTOR))
+		safe_apic_wait_icr_idle();
+	else
+		__xapic_wait_icr_idle();
+
+	/*
+	 * prepare target chip field
+	 */
+	cfg = __prepare_ICR2(mask);
+	native_apic_mem_write(APIC_ICR2, cfg);
+
+	/*
+	 * program the ICR
+	 */
+	cfg = __prepare_ICR(0, vector, dest);
+
+	/*
+	 * Send the IPI. The write to APIC_ICR fires this off.
+	 */
+	native_apic_mem_write(APIC_ICR, cfg);
 }
 
 /* dune_apic_send_ipi_x

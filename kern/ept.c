@@ -639,22 +639,20 @@ static void ept_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 	ept_invalidate_page(vcpu, mm, address);
 }
 
-static void ept_mmu_notifier_invalidate_range_start(struct mmu_notifier *mn,
-						    struct mm_struct *mm,
-						    unsigned long start,
-						    unsigned long end)
+static int ept_mmu_notifier_invalidate_range_start(struct mmu_notifier *mn,
+				     const struct mmu_notifier_range *range)
 {
 	struct vmx_vcpu *vcpu = mmu_notifier_to_vmx(mn);
 	int ret;
 	epte_t *epte;
-	unsigned long pos = start;
+	unsigned long pos = range->start;
 	bool sync_needed = false;
 
-	pr_debug("ept: invalidate_range_start start %lx end %lx\n", start, end);
+	pr_debug("ept: invalidate_range_start start %lx end %lx\n", range->start, range->end);
 
 	spin_lock(&vcpu->ept_lock);
-	while (pos < end) {
-		ret = ept_lookup(vcpu, mm, (void *) pos, 0, 0, &epte);
+	while (pos < range->end) {
+		ret = ept_lookup(vcpu, range->mm, (void *) pos, 0, 0, &epte);
 		if (!ret) {
 			pos += epte_big(*epte) ? HUGE_PAGE_SIZE : PAGE_SIZE;
 			ept_clear_epte(epte);
@@ -666,12 +664,12 @@ static void ept_mmu_notifier_invalidate_range_start(struct mmu_notifier *mn,
 
 	if (sync_needed)
 		vmx_ept_sync_vcpu(vcpu);
+	
+	return ret;
 }
 
 static void ept_mmu_notifier_invalidate_range_end(struct mmu_notifier *mn,
-						  struct mm_struct *mm,
-						  unsigned long start,
-						  unsigned long end)
+				     const struct mmu_notifier_range *range)
 {
 }
 
@@ -750,7 +748,7 @@ static void ept_mmu_notifier_release(struct mmu_notifier *mn,
 }
 
 static const struct mmu_notifier_ops ept_mmu_notifier_ops = {
-	.invalidate_page	= ept_mmu_notifier_invalidate_page,
+	//.invalidate_page	= ept_mmu_notifier_invalidate_page,
 	.invalidate_range_start	= ept_mmu_notifier_invalidate_range_start,
 	.invalidate_range_end	= ept_mmu_notifier_invalidate_range_end,
 	.clear_flush_young	= ept_mmu_notifier_clear_flush_young,

@@ -9,11 +9,11 @@
 #include <asm/i387.h>
 #endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
+//#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
 #include <asm/fpu/internal.h>
-#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0)
+/*#elif LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0)
 #include <asm/fpu-internal.h>
-#endif
+#endif*/
 
 #if !defined(VMX_EPT_AD_BIT)
 #define VMX_EPT_AD_BIT          (1ull << 21)
@@ -126,10 +126,36 @@ static inline void cr4_clear_bits(unsigned long mask)
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
+/******************************/
+static DEFINE_PER_CPU(bool, in_kernel_fpu);
+/*
+ * FPU context switch related helper methods:
+ */
+static DEFINE_PER_CPU(struct fpu *, dune_fpu_fpregs_owner_ctx);
+
+static void dune_kernel_fpu_disable(void)
+{
+	WARN_ON_FPU(this_cpu_read(in_kernel_fpu));
+	this_cpu_write(in_kernel_fpu, true);
+}
+
+static void dune_kernel_fpu_enable(void)
+{
+	WARN_ON_FPU(!this_cpu_read(in_kernel_fpu));
+	this_cpu_write(in_kernel_fpu, false);
+}
+extern void dune_fpu__restore(struct fpu *fpu);
+
+static inline void dune_fpregs_activate(struct fpu *fpu)
+{
+	this_cpu_write(dune_fpu_fpregs_owner_ctx, fpu);
+	//trace_x86_fpu_regs_activated(fpu);
+}
+
+/*************************************************/
 static inline void compat_fpu_restore(void)
 {
-	if (!current->thread.fpu.fpregs_active)
-		fpu__restore(&current->thread.fpu);
+	dune_fpu__restore(&current->thread.fpu);
 }
 #else
 static inline void compat_fpu_restore(void)

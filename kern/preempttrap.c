@@ -11,15 +11,24 @@ static struct {
 	__u8 count;
 } trap_state;
 
+#define dune_task_pt_regs(task) \
+({									\
+	unsigned long __ptr = (unsigned long)(task->stack);	\
+	__ptr += THREAD_SIZE - TOP_OF_KERNEL_STACK_PADDING;		\
+	((struct pt_regs *)__ptr) - 1;					\
+})
+
+#define dune_KSTK_EIP(task)		(dune_task_pt_regs(task)->ip)
+
 static void notifier_sched_in(struct preempt_notifier *notifier, int cpu)
 {
-	if (!trap_state.triggered && KSTK_EIP(current) == trap_conf.trigger_rip) {
+	if (!trap_state.triggered && dune_KSTK_EIP(current) == trap_conf.trigger_rip) {
 		trap_state.triggered = 1;
 		trap_state.count = trap_conf.delay;
 	}
 
 	if (trap_state.triggered && trap_state.count-- == 0) {
-		struct pt_regs *regs = task_pt_regs(current);
+		struct pt_regs *regs = dune_task_pt_regs(current);
 		struct dune_trap_regs trap_regs;
 
 		trap_state.triggered = 0;
